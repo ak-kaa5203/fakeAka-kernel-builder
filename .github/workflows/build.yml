@@ -1,0 +1,131 @@
+name: Build fakeAka Kernel (POCO F4)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+jobs:
+  build:
+    name: Build fakeAka Kernel
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf libelf-dev libncurses5-dev libssl-dev lz4 lzop \
+            make ninja-build optipng python3 libxml2 libxml2-utils rsync \
+            squashfs-tools tar unzip zip zlib1g-dev cpio kmod
+
+      - name: Download Proton Clang Toolchain
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
+      - name: Clone LineageOS SM8250 Kernel Source
+        run: |
+          git clone --depth=1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_xiaomi_sm8250.git kernel
+
+      - name: Setup KernelSU
+        run: |
+          cd kernel
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+
+      - name: Apply fakeAka Optimizations & Thermal Fix
+        run: |
+          cd kernel
+
+          # 1. Thermal Step-Charging / Anti-Tekor Fix
+          # Pastikan floor charging current tidak drop di bawah 2.5A saat suhu naik
+          sed -i 's/int fcc = .*/int fcc = 2500000;/' drivers/power/supply/qcom/step-chg-jeita.c 2>/dev/null || true
+
+          # 2. Injeksi konfigurasi khusus fakeAka ke munch.config
+          cat << 'EOF' >> arch/arm64/configs/vendor/xiaomi/munch.config
+
+          # --- fakeAka Custom Optimizations ---
+          CONFIG_LOCALVERSION="-fakeAka"
+
+          # KernelSU & Root support
+          CONFIG_KSU=y
+          CONFIG_KSU_DEBUG=n
+          CONFIG_OVERLAY_FS=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+
+          # Network & Gaming Ping (BBR)
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_DEFAULT_TCP_CONG="bbr"
+
+          # CPU Governor & Scheduler (EAS)
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          CONFIG_ENERGY_MODEL=y
+
+          # Reduce Kernel Background Overhead
+          CONFIG_DEBUG_KERNEL=n
+          CONFIG_SLUB_DEBUG=n
+          CONFIG_PANIC_ON_OOPS=n
+          EOF
+
+      - name: Compile fakeAka Kernel
+        run: |
+          cd kernel
+          export PATH="${{ github.workspace }}/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+          # Merge defconfigs untuk POCO F4 (munch)
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig vendor/xiaomi/sm8250-common.config vendor/xiaomi/munch.config
+
+          # Build Image.gz dan dtbo.img
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            Image.gz dtbo.img
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cd AnyKernel3
+
+          # Konfigurasi AnyKernel3 khusus POCO F4 (munch)
+          sed -i 's/device.name1=.*/device.name1=munch/g' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=munchin/g' anykernel.sh
+          sed -i 's/device.name3=.*/device.name3=22021211RG/g' anykernel.sh
+          sed -i 's/device.name4=.*/device.name4=22021211RI/g' anykernel.sh
+          sed -i 's/block=.*/block=boot;/g' anykernel.sh
+          sed -i 's/is_slot_device=.*/is_slot_device=auto;/g' anykernel.sh
+          sed -i 's/kernel.string=.*/kernel.string=fakeAka Kernel for POCO F4 (munch) by Aka/g' anykernel.sh
+
+          # Salin hasil kompilasi
+          cp ../kernel/out/arch/arm64/boot/Image.gz .
+          if [ -f ../kernel/out/arch/arm64/boot/dtbo.img ]; then
+            cp ../kernel/out/arch/arm64/boot/dtbo.img .
+          fi
+
+          # Buat file zip flashable
+          BUILD_DATE=$(date +'%Y%m%d')
+          zip -r9 "../fakeAka-Kernel-munch-${BUILD_DATE}.zip" * -x .git README.md *placeholder
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fakeAka-Kernel-munch
+          path: |
+            fakeAka-Kernel-munch-*.zip
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/dtbo.img
