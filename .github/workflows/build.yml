@@ -22,7 +22,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             git gnupg gperf libelf-dev libncurses5-dev libssl-dev lz4 lzop \
             make ninja-build optipng python3 libxml2 libxml2-utils rsync \
             squashfs-tools tar unzip zip zlib1g-dev cpio kmod
@@ -88,7 +87,7 @@ jobs:
           # Buat direktori output
           mkdir -p out
 
-          # 1. Generate base defconfig dengan CC=clang
+          # 1. Generate base defconfig
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- vendor/kona-perf_defconfig
 
           # 2. Gabungkan fragment defconfig munch & sm8250
