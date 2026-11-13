@@ -34,10 +34,14 @@ jobs:
         run: |
           git clone --depth=1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_xiaomi_sm8250.git kernel
 
-      - name: Setup KernelSU
+      - name: Setup KernelSU (v0.9.5 for Linux 4.19)
         run: |
           cd kernel
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          # Gunakan KernelSU v0.9.5 resmi yang stabil untuk kernel non-GKI 4.19
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
+          # Tambahkan kompatibilitas MODULE_IMPORT_NS untuk Linux 4.19
+          find drivers/kernelsu/ -name "*.c" -o -name "*.h" | xargs sed -i '1s/^/#ifndef MODULE_IMPORT_NS\n#define MODULE_IMPORT_NS(x)\n#endif\n/' 2>/dev/null || true
 
       - name: Apply fakeAka Optimizations & Thermal Fix
         run: |
@@ -97,6 +101,7 @@ jobs:
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- olddefconfig
 
           # 4. Kompilasi kernel biner Image.gz dan device tree
+          set -o pipefail
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
