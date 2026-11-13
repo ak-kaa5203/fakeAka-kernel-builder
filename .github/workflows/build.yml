@@ -93,6 +93,7 @@ jobs:
           cp ../kernel/out/arch/arm64/boot/Image.gz .
           cp ../kernel/out/arch/arm64/boot/dtbo.img ./munch-aosp-dtbo.img
           cp ../kernel/out/arch/arm64/boot/dtb.img ./munch-normal-gpustk-dtb
+          touch ./aosp-normal-gpustk.dreamless
 
           # Buat file zip flashable
           BUILD_DATE=$(date +'%Y%m%d')
