@@ -34,36 +34,39 @@ jobs:
           tar -xf clang.tar -C clang
           rm -f clang.tar clang.tar.zst
 
-      - name: Clone sm8250 Kernel Source (freesia)
+      - name: Clone sm8250 Kernel Source (flos-personal)
         run: |
-          git clone --depth=1 --branch freesia https://github.com/re-noroi/kernel_sm8250.git kernel
+          git clone --depth=1 --branch flos-personal https://github.com/re-noroi/kernel_sm8250.git kernel
 
       - name: Apply fakeAka Customizations & Optimizations
         run: |
           cd kernel
 
+          # Mencegah git dirty "+" atau sha suffix pada kernel version
+          touch .scmversion
+
           # 1. Atur Nama Kernel fakeAka
           sed -i 's/CONFIG_LOCALVERSION="-FakeDreamer"/CONFIG_LOCALVERSION="-fakeAka"/' arch/arm64/configs/vendor/munch_defconfig
+          chmod +x ./scripts/config
+          ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --disable CONFIG_LOCALVERSION_AUTO
+          ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --set-str CONFIG_LOCALVERSION "-fakeAka"
 
-          # 2. Kembalikan Frekuensi GPU ke Stock (Anti-Panas & Anti-Overheat saat Gaming)
-          if [ -f "0001-stock-gpu-freq.patch" ]; then
-            patch -p1 -f < "0001-stock-gpu-freq.patch" || true
-          fi
-
-          # 3. Strip incompatible MLGO flags for Neutron Clang
+          # 2. Strip incompatible MLGO flags for Neutron Clang
           sed -i -e '/regalloc-enable-advisor/s/^/#/' -e '/enable-ml-inliner/s/^/#/' -e '/ml-inliner-model-selector/s/^/#/' Makefile
 
-          # 4. Aktifkan Fitur fakeAka di munch_defconfig
-          chmod +x ./scripts/config
+          # 3. Aktifkan Fitur fakeAka di munch_defconfig
           ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --enable CONFIG_KSU
-          ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --enable CONFIG_BYPASS_CHARGING
           ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --enable CONFIG_TCP_CONG_BBR
+          ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --enable CONFIG_DEFAULT_BBR
           ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
           ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --enable CONFIG_LTO_CLANG_THIN
           ./scripts/config --file arch/arm64/configs/vendor/munch_defconfig --disable CONFIG_LTO_CLANG_FULL
 
-          # 5. Fix Thermal Step-Charging Floor (Jangan drop di bawah 2.5A saat suhu naik)
-          sed -i 's/int fcc = .*/int fcc = 2500000;/' drivers/power/supply/qcom/step-chg-jeita.c 2>/dev/null || true
+          # 4. Anti-Tekor Charging Floor: cegah charging drop di bawah 2.5A saat suhu naik
+          sed -i '/if (chip->cold_step_chg_cfg_valid)/i \	if (fcc_ua > 0 && fcc_ua < 2500000) fcc_ua = 2500000;' drivers/power/supply/qcom/step-chg-jeita.c
+
+          # 5. Pastikan spoof uname 5.15.190 untuk bpfloader/netbpfload/netd di Android 16 aktif
+          grep -q "5.15.190" kernel/sys.c && echo "BPF uname spoof 5.15.190 verified!"
 
       - name: Compile fakeAka Kernel
         run: |
