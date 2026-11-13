@@ -22,6 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             git gnupg gperf libelf-dev libncurses5-dev libssl-dev lz4 lzop \
             make ninja-build optipng python3 libxml2 libxml2-utils rsync \
             squashfs-tools tar unzip zip zlib1g-dev cpio kmod
@@ -79,18 +80,27 @@ jobs:
           export PATH="${{ github.workspace }}/clang/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-          # Merge defconfig menggunakan merge_config.sh resmi kernel
+          # Buat direktori output
           mkdir -p out
-          make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          ./scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/xiaomi/sm8250-common.config arch/arm64/configs/vendor/xiaomi/munch.config
-          make O=out ARCH=arm64 olddefconfig
 
-          # Kompilasi Image.gz dan device tree
+          # 1. Generate base defconfig dengan CC=clang
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- vendor/kona-perf_defconfig
+
+          # 2. Gabungkan fragment defconfig munch & sm8250
+          ./scripts/kconfig/merge_config.sh -m -O out out/.config arch/arm64/configs/vendor/xiaomi/sm8250-common.config arch/arm64/configs/vendor/xiaomi/munch.config
+
+          # 3. Finalisasi config
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- olddefconfig
+
+          # 4. Kompilasi kernel biner Image.gz dan device tree
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             AR=llvm-ar \
@@ -98,7 +108,7 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            Image.gz dtbs
+            Image.gz dtbs 2>&1 | tee ../kernel_build.log
 
       - name: Package with AnyKernel3
         run: |
@@ -126,9 +136,11 @@ jobs:
           zip -r9 "../fakeAka-Kernel-munch-${BUILD_DATE}.zip" * -x .git README.md *placeholder
 
       - name: Upload Kernel Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fakeAka-Kernel-munch
           path: |
             fakeAka-Kernel-munch-*.zip
             kernel/out/arch/arm64/boot/Image.gz
+            kernel_build.log
